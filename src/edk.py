@@ -5,7 +5,7 @@ import logging
 
 import boto3
 from botocore.exceptions import ClientError
-
+from cryptography.fernet import Fernet
 
 AWS_REGION = 'eu-west-1'
 
@@ -42,16 +42,16 @@ def parse_input_arguments():
 
     parent_parser.add_argument('-f',
                                '--file',
-                               type=argparse.FileType('r'),
+                               type=str,
                                dest='file',
                                metavar="<file>",
                                help="File to encrypt/decrypt")
 
     parent_parser.add_argument('-o',
-                               type=argparse.FileType('w'),
+                               type=str,
                                dest='output',
                                metavar="<output file>",
-                               help="Output encrypted string or file to a different filei (default: .encrypted)")
+                               help="Output encrypted string or file to a different file")
 
     encrypt = subparsers.add_parser(
         'encrypt',
@@ -83,7 +83,31 @@ def encrypt_string(string, kms):
 
 
 def encrypt_file(file, kms):
-    return "Not implemented yet!"
+    client = boto3.client("kms", region_name=AWS_REGION)
+    key_spec = 'AES_256'
+
+    try:
+        with open(file, "rb") as f:
+            file_contents = f.read()
+    except IOError as err:
+        raise Exception("Error reading file %s\n%s", err)
+
+    try:
+        data_key = client.generate_data_key(KeyId=kms,
+                                            KeySpec=key_spec)
+    except ClientError as err:
+        raise Exception("Error generating data key:\n%s", err)
+
+    data_key_encrypted = data_key['CiphertextBlob']
+    data_key_plaintext = base64.b64encode(data_key['Plaintext'])
+
+    if data_key_encrypted is None:
+        raise Exception("Encrypted data key is None")
+
+    f = Fernet(data_key_plaintext)
+    encrypted_file_contents = f.encrypt(file_contents)
+
+    return encrypted_file_contents
 
 
 def decrypt_string(string, kms):
@@ -96,35 +120,67 @@ def decrypt_string(string, kms):
         )
     except ClientError as err:
         raise Exception(
-            "An error occurred during decryption of %s: %s", string, err)
+            "An error occurred during decryption of %s\n%s", string, err)
     else:
         return plain_text["Plaintext"]
 
 
 def decrypt_file(file, kms):
-    return "Not implemented yet!"
+    client = boto3.client("kms", region_name=AWS_REGION)
+    key_spec = 'AES_256'
+
+    try:
+        with open(file, "rb") as f:
+            file_contents = f.read()
+    except IOError as err:
+        raise Exception("Error reading file %s\n%s", err)
+
+    try:
+        data_key = client.generate_data_key(KeyId=kms,
+                                            KeySpec=key_spec)
+    except ClientError as err:
+        raise Exception("Error generating data key:\n%s", err)
+
+    data_key_encrypted = data_key['CiphertextBlob']
+    data_key_plaintext = base64.b64encode(data_key['Plaintext'])
+
+    if data_key_encrypted is None:
+        raise Exception("Encrypted data key is None")
+
+    f = Fernet(data_key_plaintext)
+    decrypted_file_contents = f.decrypt(file_contents)
+
+    return decrypted_file_contents
 
 
 def main(args):
     try:
         if args.command == 'encrypt':
-            encrypted = ""
+            encrypted = None
             if args.string:
                 encrypted = encrypt_string(args.string, args.kms)
             if args.file:
-                encrypted = encrypt_file(args.file, args.kms)
-
-            print(encrypted)
+                encrypted_file = encrypt_file(
+                    args.file, args.kms)
+                if args.output:
+                    with open(args.output, 'wb') as output_file:
+                        output_file.write(encrypted_file)
+                else:
+                    print(encrypted_file)
 
         if args.command == 'decrypt':
-            decrypted = ""
             if args.string:
                 decrypted = decrypt_string(
                     args.string, args.kms).decode('utf8')
+                print(decrypted)
             if args.file:
-                decrypted = decrypt_file(args.file, args.kms)
+                decrypted_file = decrypt_file(args.file, args.kms)
+                if args.output:
+                    with open(args.output, 'wb') as output_file:
+                        output_file.write(decrypted_file)
+                else:
+                    print(decrypted_file)
 
-            print(decrypted)
     except Exception as ex:
         logger.exception(ex)
 
