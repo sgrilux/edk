@@ -81,31 +81,40 @@ def encrypt_string(string, kms):
     else:
         return base64.b64encode(cipher_text["CiphertextBlob"])
 
-
-def encrypt_file(file, kms):
-    client = boto3.client("kms", region_name=AWS_REGION)
+def _get_data_key(key_id):
     key_spec = 'AES_256'
 
+    client = boto3.client("kms", region_name=AWS_REGION)
+
+    try:
+        data_key = client.generate_data_key(KeyId=key_id,
+                                        KeySpec=key_spec)
+    
+    except ClientError as err:
+        raise Exception("Error generating data key:\n%s", err)
+    
+    data_key_encrypted = data_key['CiphertextBlob']
+    data_key_plaintext = base64.b64encode(data_key['Plaintext']) 
+
+    return data_key_encrypted, data_key_plaintext
+
+def encrypt_file(file, kms):
     try:
         with open(file, "rb") as f:
             file_contents = f.read()
+
+        data_key_encrypted,data_key_plaintext = _get_data_key(kms)
+
+        if data_key_encrypted is None:
+            raise Exception("Encrypted data key is None")
+
+        f = Fernet(data_key_plaintext)
+        encrypted_file_contents = f.encrypt(file_contents)
+
     except IOError as err:
         raise Exception("Error reading file %s\n%s", err)
-
-    try:
-        data_key = client.generate_data_key(KeyId=kms,
-                                            KeySpec=key_spec)
-    except ClientError as err:
-        raise Exception("Error generating data key:\n%s", err)
-
-    data_key_encrypted = data_key['CiphertextBlob']
-    data_key_plaintext = base64.b64encode(data_key['Plaintext'])
-
-    if data_key_encrypted is None:
-        raise Exception("Encrypted data key is None")
-
-    f = Fernet(data_key_plaintext)
-    encrypted_file_contents = f.encrypt(file_contents)
+    except Exception as ex:
+        raise Exception("Error encrypting file %s", file)
 
     return encrypted_file_contents
 
@@ -126,29 +135,22 @@ def decrypt_string(string, kms):
 
 
 def decrypt_file(file, kms):
-    client = boto3.client("kms", region_name=AWS_REGION)
-    key_spec = 'AES_256'
-
     try:
         with open(file, "rb") as f:
             file_contents = f.read()
+
+        data_key_encrypted, data_key_plaintext = _get_data_key(kms)
+
+        if data_key_encrypted is None:
+            raise Exception("Encrypted data key is None")
+
+        f = Fernet(data_key_plaintext)
+        decrypted_file_contents = f.decrypt(file_contents)
+    
     except IOError as err:
         raise Exception("Error reading file %s\n%s", err)
-
-    try:
-        data_key = client.generate_data_key(KeyId=kms,
-                                            KeySpec=key_spec)
-    except ClientError as err:
-        raise Exception("Error generating data key:\n%s", err)
-
-    data_key_encrypted = data_key['CiphertextBlob']
-    data_key_plaintext = base64.b64encode(data_key['Plaintext'])
-
-    if data_key_encrypted is None:
-        raise Exception("Encrypted data key is None")
-
-    f = Fernet(data_key_plaintext)
-    decrypted_file_contents = f.decrypt(file_contents)
+    except Exception as err:
+        raise Exception("Error decrypting file :%s", file)
 
     return decrypted_file_contents
 
