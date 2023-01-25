@@ -98,25 +98,25 @@ def _get_data_key(key_id):
 
     return data_key_encrypted, data_key_plaintext
 
-def encrypt_file(file, kms):
+def encrypt_file(file, kms_id):
     try:
-        with open(file, "rb") as f:
-            file_contents = f.read()
-
-        data_key_encrypted,data_key_plaintext = _get_data_key(kms)
-
-        if data_key_encrypted is None:
-            raise Exception("Encrypted data key is None")
-
-        f = Fernet(data_key_plaintext)
-        encrypted_file_contents = f.encrypt(file_contents)
-
+        with open(file, 'rb') as f:
+            plaintext = f.read()
+            
+        # Encrypt the file data
+        response = kms.encrypt(
+            KeyId=key_id,
+            Plaintext=plaintext
+        )
+        
+        # Get the encrypted data
+        encrypted_data = response['CiphertextBlob']
     except IOError as err:
         raise Exception("Error reading file %s\n%s", err)
     except Exception as ex:
         raise Exception("Error encrypting file %s", file)
 
-    return encrypted_file_contents
+    return encrypted_data
 
 
 def decrypt_string(string, kms):
